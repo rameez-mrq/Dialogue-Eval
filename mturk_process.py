@@ -10,6 +10,7 @@ from scipy.stats import (
     pearsonr, spearmanr, kendalltau,
 )
 import scipy.stats as stats
+from collections import Counter
 
 
 class MTurkProcessJSON:
@@ -21,7 +22,7 @@ class MTurkProcessJSON:
         self.file = f"{fpath}"
         print(f'init file {fpath}')
         self.fpath = fpath
-        self.savedir = fpath.parent.joinpath("Results")
+        self.savedir = fpath.parent.joinpath("Results_trials")
         self.qc_threshold = 0.05
         with self.fpath.open() as f:
             js_data = json.load(f)
@@ -57,12 +58,25 @@ class MTurkProcessJSON:
 
     def process(self):
         self.get_worker_std_mean()
+        print("worker_std_mean: Finished ")
         self.update_pd_data_with_zscores()
+        # print("pd_data: ", self.pd_data)
+        print("update_pd_data_with_zscores: Finished")
         self.quality_control_by_workers()
+        # print("worker_pvalues: ", self.pd_passed)
+        print("quality_control_by_workers: Finished")
         self.compute_passrates()
+        # print("passrate: ", self.pd_passrate)
+        print("compute_passrates: Finished")
         self.get_model_scores()
+        # print("model_scores: ", self.pd_model_scores)
+        print("get_model_scores: Finished")
         self.duration_data()
+        # print("duration: ", self.pd_duration)
+        print("duration_data: Finished")
         self.get_model_metadata()
+        # print("model_metadata: ", self.model_metadata)
+        print("get_model_metadata: Finished")
 
     def process_js_data_to_pd(self):
         js_data = self.js_data
@@ -79,6 +93,7 @@ class MTurkProcessJSON:
                     "model": model,
                 }
                 score = dial_data['score']
+                # print("Score: ",score)
                 for scoretype, scorevalue in score.items():
                     if scoretype in self.positive_scores:
                         cur_line[scoretype] = scorevalue
@@ -98,13 +113,16 @@ class MTurkProcessJSON:
         reverse = list(reverse)
         reverse = ', '.join(reverse)
         print(f"reversed: [{reverse}]")
+        print("size of pd_data: ", pd_data.shape)
         self.pd_data = pd_data
 
     def get_std_mean(self, scores):
+        # print("std_mean: ",scores)
         std_mean = {
             "mean": np.mean(scores),
             "std": np.std(scores, ddof=1),
         }
+        # print(f"std_mean: {std_mean}")
         return std_mean
 
     def get_worker_std_mean(self):
@@ -146,10 +164,11 @@ class MTurkProcessJSON:
         pd_data[raw_scoretypes] = rawscores
 
         avg_zscores = np.mean(zscores, axis=1).reshape(-1, 1)
-
+        # print("avg_zscores: ", avg_zscores)
         pd_data['z'] = avg_zscores
         avg_rawscores = np.mean(rawscores, axis=1).reshape(-1, 1)
-        pd_data['raw'] = avg_rawscores
+        # print("avg_rawscores: ", avg_rawscores)
+        # pd_data['raw'] = avg_rawscores
 
         self.pd_data = pd_data
 
@@ -157,6 +176,7 @@ class MTurkProcessJSON:
         result = mannwhitneyu(qc_scores, model_scores, alternative='less', method="auto")
         # result = ranksums(qc_scores,model_scores,alternative='less')
         pvalue = result.pvalue
+        # print(f"pvalue: {pvalue}")
         return pvalue
 
     def quality_control_by_workers(self):
@@ -165,7 +185,9 @@ class MTurkProcessJSON:
         failed_workers = []
         for workerID in self.workerIDs:
             worker_std = self.worker_std_mean[workerID]['std']
+            # print(f"worker_std: {worker_std}")
             worker_mean = self.worker_std_mean[workerID]['mean']
+            # print(f"worker_mean: {worker_mean}")
             if worker_std == 0:
                 worker_pvalues[workerID] = 1.0
                 failed_workers.append(workerID)
@@ -180,17 +202,26 @@ class MTurkProcessJSON:
 
             pvalue = self.quality_control(qc_scores, model_scores)
             worker_pvalues[workerID] = pvalue
+            # print("pvalue: ",worker_pvalues)
             if pd.isna(pvalue) or pvalue >= self.qc_threshold:
                 failed_workers.append(workerID)
             else:
                 passed_workers.append(workerID)
+                # print("passed_workers: ", passed_workers)
 
         self.worker_pvalues = worker_pvalues
+        #save worker p_values as json
+        # f_worker_pvalues = self.savedir.joinpath("worker_pvalues.json")
+        # with f_worker_pvalues.open('w') as f:
+        #     json.dump(worker_pvalues, f, indent=2)
+            
         self.failed_workers = failed_workers
         self.passed_workers = passed_workers
+        # print("len(failed_workers): ", len(failed_workers))
+        # print("len(passed_workers): ", len(passed_workers))
+        # print("passed_workers: ", passed_workers)
 
         pd_data = self.pd_data
-
         pd_passed = pd_data[pd_data['workerID'].isin(passed_workers)]
         passed_assigns = pd_passed['assignID'].values
         passed_assigns = np.unique(passed_assigns).tolist()
@@ -204,14 +235,17 @@ class MTurkProcessJSON:
         failed_assigns = pd_failed['assignID'].values
         failed_assigns = np.unique(failed_assigns).tolist()
         failed_hits = pd_failed['hitID'].values
+
         failed_hits = np.unique(failed_hits).tolist()
         self.pd_failed = pd_failed
         self.failed_assigns = failed_assigns
         self.failed_hits = failed_hits
+        #print the workerID which not in failed_workers and passed_workers
+
+
 
     def get_model_scores(self):
-        pd_passed = self.pd_passed
-
+        pd_passed = self.pd_passed        
         if self.model_ranking is None:
             modelnames = self.modelnames
         else:
@@ -231,9 +265,12 @@ class MTurkProcessJSON:
             }
             # z score
             zscores = pd_model[self.sorted_scores].values
+            # print("zscores: ", zscores)
             mean_zscores = np.mean(zscores, axis=0).tolist()
+            # print("mean_zscores: ", mean_zscores)
             mean_zscore_dict = dict(zip(self.sorted_scores, mean_zscores))
             overall_zscore = np.mean(zscores)
+            # print("overall_zscore: ", overall_zscore)
             model_dict['z'] = overall_zscore
             model_dict.update(mean_zscore_dict)
             data_model_scores.append(model_dict)
@@ -267,7 +304,8 @@ class MTurkProcessJSON:
     def compute_passrates(self):
         passrate_data = []
 
-        n_passed_hit = len(self.passed_hits)
+        # n_passed_hit = len(self.passed_hits) HIT IDs might be repeated
+        n_passed_hit = len(self.passed_assigns)
         n_all_hit = n_passed_hit + len(self.failed_hits)
         passrate_hit = n_passed_hit / n_all_hit
         hit_dict = {
@@ -304,8 +342,11 @@ class MTurkProcessJSON:
         all_durations = passed_durations + failed_durations
 
         passed_avg_duration_sconds = np.mean(passed_durations)
+        print("passed_avg_duration_sconds: ", passed_avg_duration_sconds)
         failed_avg_duration_sconds = np.mean(failed_durations)
+        print("failed_avg_duration_sconds: ", failed_avg_duration_sconds)
         all_avg_duration_sconds = np.mean(all_durations)
+        print("all_avg_duration_sconds: ", all_avg_duration_sconds)
 
         model_num = len(self.js_data[0]['result'])  # get models per hit
 
@@ -337,10 +378,10 @@ class MTurkProcessJSON:
         # save worker_ids
         f_passed_worker = savedir.joinpath("passed_workers.json")
         with f_passed_worker.open('w') as f:
-            json.dump(self.passed_workers, f, indent=2)
+            json.dump(self.passed_workers, f, indent=2, default=str)
         f_failed_worker = savedir.joinpath("failed_worker.json")
         with f_failed_worker.open('w') as f:
-            json.dump(self.failed_workers, f, indent=2)
+            json.dump(self.failed_workers, f, indent=2, default=str)
 
         # save assignment_ids
         f_passed_assign = savedir.joinpath("passed_assignment.json")
